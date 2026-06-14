@@ -16,6 +16,8 @@ def _parse_list(env_val):
 
 RSS_FEEDS = _parse_list(os.getenv("RSS_FEEDS", ""))
 INTERESTS = _parse_list(os.getenv("INTERESTS", ""))
+SEARCH_KEYWORDS = _parse_list(os.getenv("SEARCH_KEYWORDS", ""))
+SEARCH_MAX_RESULTS = int(os.getenv("SEARCH_MAX_RESULTS", "10"))
 
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
@@ -60,13 +62,81 @@ def _strip_html(text):
     return re.sub(r"<[^>]+>", "", text)
 
 
+def _search_google_news(keyword, items):
+    import urllib.parse
+    encoded = urllib.parse.quote(keyword)
+    url = f"https://news.google.com/rss/search?q={encoded}&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
+    feed = feedparser.parse(url)
+    for entry in feed.entries[:5]:
+        title = entry.get("title", "").strip()
+        link = entry.get("link", "").strip()
+        summary = _strip_html(entry.get("summary", "") or entry.get("description", ""))[:300]
+        items.append({
+            "title": title, "link": link, "summary": summary,
+            "published": entry.get("published", ""),
+            "source": "news", "keyword": keyword,
+        })
+    print(f"[INFO] Google News: {len(feed.entries[:5])} results for '{keyword}'")
+
+
+def _search_bing_web(keyword, max_results, items):
+    import urllib.parse
+    import re
+
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    url = f"https://www.bing.com/search?q={urllib.parse.quote(keyword)}&setlang=zh-cn&count={max_results}"
+    resp = requests.get(url, headers=headers, timeout=15)
+    if resp.status_code != 200:
+        print(f"[WARN] Bing search returned {resp.status_code}")
+        return
+
+    blocks = re.findall(r'<li class="b_algo"[^>]*>(.*?)</li>', resp.text, re.DOTALL)
+    for block in blocks[:max_results]:
+        link_m = re.search(r'<a[^>]*href="(https?://[^"]+)"[^>]*>(.*?)</a>', block, re.DOTALL)
+        if not link_m:
+            continue
+        href = link_m.group(1)
+        title = _strip_html(link_m.group(2)).strip()
+        snippet_m = re.search(r'<p[^>]*>(.*?)</p>', block, re.DOTALL)
+        snippet = _strip_html(snippet_m.group(1)).strip()[:300] if snippet_m else ""
+        items.append({
+            "title": title, "link": href, "summary": snippet,
+            "published": "", "source": "web", "keyword": keyword,
+        })
+    print(f"[INFO] Bing web: {len(blocks[:max_results])} results for '{keyword}'")
+
+
+def search_keywords():
+    keywords = _parse_list(os.getenv("SEARCH_KEYWORDS", ""))
+    if not keywords:
+        return []
+
+    max_results = int(os.getenv("SEARCH_MAX_RESULTS", "10"))
+    items = []
+
+    for keyword in keywords:
+        try:
+            _search_google_news(keyword, items)
+        except Exception as e:
+            print(f"[WARN] Google News search failed for '{keyword}': {e}")
+        try:
+            _search_bing_web(keyword, max_results, items)
+        except Exception as e:
+            print(f"[WARN] Bing web search failed for '{keyword}': {e}")
+
+    print(f"[INFO] Search returned {len(items)} results for {len(keywords)} keyword(s)")
+    return items
+
+
 def summarize_with_deepseek(news_items):
     if not news_items:
         return None
 
     news_text = ""
     for i, item in enumerate(news_items):
-        news_text += f"{i + 1}. [{item['title']}]({item['link']})\n"
+        src = f" [{item.get('source', 'rss')}]" if item.get('source') else ""
+        kw = f" 🔍{item['keyword']}" if item.get('keyword') else ""
+        news_text += f"{i + 1}. [{item['title']}]({item['link']}){src}{kw}\n"
         if item["summary"]:
             news_text += f"   摘要: {item['summary'][:200]}\n"
 
@@ -75,16 +145,17 @@ def summarize_with_deepseek(news_items):
 
 用户的兴趣领域：{', '.join(INTERESTS)}
 
-以下是今天抓取的新闻列表：
+以下是今天抓取的新闻列表（带有🔍标记的来自用户的追踪关键词搜索）：
 
 {news_text}
 
 请完成以下任务：
 1. 从中筛选出与用户兴趣最相关、最重要的 10 条新闻
-2. 用中文为每条生成简洁摘要（1-2 句）
-3. 给出简短的影响分析
-4. 按重要性排序，用 ★ 评分（最高 ★★★★★，最低 ★★★☆☆）
-5. 每条新闻必须保留原始链接
+2. 如果有关键词追踪结果（🔍标记），也在末尾列出最重要的 5 条
+3. 用中文为每条生成简洁摘要（1-2 句）
+4. 给出简短的影响分析
+5. 按重要性排序，用 ★ 评分（最高 ★★★★★，最低 ★★★☆☆）
+6. 每条新闻必须保留原始链接
 
 输出格式严格为（不要添加额外的前言后语）：
 
@@ -207,6 +278,19 @@ def main():
         return
 
     news_items = fetch_all_news()
+
+    search_items = search_keywords()
+    if search_items:
+        news_items.extend(search_items)
+        seen = set()
+        unique = []
+        for item in news_items:
+            key = item.get("link", "") or item.get("title", "")
+            if key not in seen:
+                seen.add(key)
+                unique.append(item)
+        news_items = unique[:MAX_TOTAL_ITEMS]
+
     if not news_items:
         print("[WARN] No news fetched, sending error notification")
         send_telegram("⚠️ 今日新闻抓取失败，请检查 RSS 源。")
