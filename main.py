@@ -19,9 +19,26 @@ def _parse_list(env_val):
     return [x.strip() for x in env_val.split(",") if x.strip()]
 
 
+def _parse_groups(env_val):
+    if not env_val:
+        return {}
+    groups = {}
+    for part in env_val.split(";"):
+        part = part.strip()
+        if ":" not in part:
+            continue
+        name, kw_str = part.split(":", 1)
+        name = name.strip()
+        keywords = [k.strip() for k in kw_str.split(",") if k.strip()]
+        if name and keywords:
+            groups[name] = keywords
+    return groups
+
+
 RSS_FEEDS = _parse_list(os.getenv("RSS_FEEDS", ""))
 INTERESTS = _parse_list(os.getenv("INTERESTS", ""))
 SEARCH_KEYWORDS = _parse_list(os.getenv("SEARCH_KEYWORDS", ""))
+SEARCH_KEYWORD_GROUPS = _parse_groups(os.getenv("SEARCH_KEYWORD_GROUPS", ""))
 SEARCH_MAX_RESULTS = int(os.getenv("SEARCH_MAX_RESULTS", "10"))
 SEARCH_TIME_RANGE = os.getenv("SEARCH_TIME_RANGE", "m")
 TEST_MODE = os.getenv("TEST_MODE", "").lower() in ("1", "true", "yes")
@@ -69,7 +86,7 @@ def _strip_html(text):
     return re.sub(r"<[^>]+>", "", text)
 
 
-def _search_google_news(keyword, items):
+def _search_google_news(keyword, items, group=None):
     import urllib.parse
     encoded = urllib.parse.quote(keyword)
     url = f"https://news.google.com/rss/search?q={encoded}&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
@@ -78,15 +95,18 @@ def _search_google_news(keyword, items):
         title = entry.get("title", "").strip()
         link = entry.get("link", "").strip()
         summary = _strip_html(entry.get("summary", "") or entry.get("description", ""))[:300]
-        items.append({
+        item = {
             "title": title, "link": link, "summary": summary,
             "published": entry.get("published", ""),
             "source": "news", "keyword": keyword,
-        })
+        }
+        if group:
+            item["group"] = group
+        items.append(item)
     print(f"[INFO] Google News: {len(feed.entries[:5])} results for '{keyword}'")
 
 
-def _search_bing_web(keyword, max_results, items):
+def _search_bing_web(keyword, max_results, items, group=None):
     import urllib.parse
     import re
 
@@ -106,33 +126,50 @@ def _search_bing_web(keyword, max_results, items):
         title = _strip_html(link_m.group(2)).strip()
         snippet_m = re.search(r'<p[^>]*>(.*?)</p>', block, re.DOTALL)
         snippet = _strip_html(snippet_m.group(1)).strip()[:300] if snippet_m else ""
-        items.append({
+        item = {
             "title": title, "link": href, "summary": snippet,
             "published": "", "source": "web", "keyword": keyword,
-        })
+        }
+        if group:
+            item["group"] = group
+        items.append(item)
     print(f"[INFO] Bing web: {len(blocks[:max_results])} results for '{keyword}'")
 
 
 def search_keywords():
-    keywords = _parse_list(os.getenv("SEARCH_KEYWORDS", ""))
+    if SEARCH_KEYWORD_GROUPS:
+        groups = SEARCH_KEYWORD_GROUPS
+        keywords = []
+        for kw_list in groups.values():
+            keywords.extend(kw_list)
+    else:
+        groups = None
+        keywords = SEARCH_KEYWORDS
+
     if not keywords:
-        return []
+        return [], groups
 
     max_results = int(os.getenv("SEARCH_MAX_RESULTS", "10"))
     items = []
 
     for keyword in keywords:
+        group = None
+        if groups:
+            for gname, kws in groups.items():
+                if keyword in kws:
+                    group = gname
+                    break
         try:
-            _search_google_news(keyword, items)
+            _search_google_news(keyword, items, group)
         except Exception as e:
             print(f"[WARN] Google News search failed for '{keyword}': {e}")
         try:
-            _search_bing_web(keyword, max_results, items)
+            _search_bing_web(keyword, max_results, items, group)
         except Exception as e:
             print(f"[WARN] Bing web search failed for '{keyword}': {e}")
 
     print(f"[INFO] Search returned {len(items)} results for {len(keywords)} keyword(s)")
-    return items
+    return items, groups
 
 
 def summarize_with_deepseek(news_items):
@@ -203,19 +240,76 @@ def _call_deepseek(prompt):
     return data["choices"][0]["message"]["content"]
 
 
-def summarize_keyword_tracking(tracking_items, keywords):
+def summarize_keyword_tracking(tracking_items, groups=None):
     if not tracking_items:
         return None
 
-    items_text = ""
-    for i, item in enumerate(tracking_items):
-        src = item.get("source", "web")
-        items_text += f"{i + 1}. [{item['title']}]({item['link']}) [{src}]\n"
-        if item["summary"]:
-            items_text += f"   摘要: {item['summary'][:200]}\n"
+    if groups:
+        items_text = ""
+        for gname, kws in groups.items():
+            group_items = [it for it in tracking_items if it.get("group") == gname]
+            if not group_items:
+                continue
+            items_text += f"\n## {gname}\n"
+            for i, item in enumerate(group_items):
+                src = item.get("source", "web")
+                items_text += f"{len(items_text.splitlines())}. [{item['title']}]({item['link']}) [{src}]\n"
+                if item["summary"]:
+                    items_text += f"   摘要: {item['summary'][:200]}\n"
+        keywords = [kw for kws in groups.values() for kw in kws]
+        groups_section = "，".join(f"{g}: {', '.join(kws)}" for g, kws in groups.items())
+    else:
+        keywords = SEARCH_KEYWORDS
+        items_text = ""
+        for i, item in enumerate(tracking_items):
+            src = item.get("source", "web")
+            items_text += f"{i + 1}. [{item['title']}]({item['link']}) [{src}]\n"
+            if item["summary"]:
+                items_text += f"   摘要: {item['summary'][:200]}\n"
+        groups_section = None
 
     now = datetime.now()
-    prompt = f"""你是一个信息监控助手，帮助用户追踪特定关键词的最新动态。
+    if groups:
+        prompt = f"""你是一个信息监控助手，帮助用户追踪特定关键词的最新动态。
+
+追踪主题分组：
+{groups_section}
+
+以下是今天从网络搜索（新闻、论坛、社交媒体）中抓取到的相关信息，已按主题分组：
+{items_text}
+
+请完成以下任务：
+1. 每个主题筛选出最重要的 2-3 条信息
+2. 用中文为每条生成简洁摘要（1-2 句）
+3. 按重要性排序，用 ★ 评分
+4. 判断情感倾向（正面/负面/中性）
+5. ⚠️ 如果发现负面信息（投诉、维权、经营异常、资金链、跑路等），必须用 ⚠️ 特别标注并说明
+6. 最后给出综合风险评估（低/中/高）
+
+输出格式严格为（不要添加额外的前言后语）：
+
+🔍 关键词追踪 {now.strftime('%Y年%m月%d日')}
+
+## {list(groups.keys())[0] if groups else ''}
+
+★★★★★ **[标题](链接)**
+摘要：...
+来源：新闻/论坛/社交媒体
+情感：正面/负面/中性
+
+⚠️ 风险提示：（如有）
+
+## {list(groups.keys())[1] if len(groups) > 1 else ''}
+
+★★★★★ **[标题](链接)**
+摘要：...
+来源：新闻/论坛/社交媒体
+情感：正面/负面/中性
+
+综合风险评估：低/中/高
+"""
+    else:
+        prompt = f"""你是一个信息监控助手，帮助用户追踪特定关键词的最新动态。
 
 追踪关键词：{', '.join(keywords)}
 
@@ -355,13 +449,15 @@ def main():
         send_telegram("⚠️ 今日新闻抓取失败，请检查 RSS 源。")
 
     # 关键词追踪
-    if SEARCH_KEYWORDS:
-        tracking_items = search_keywords()
+    has_keywords = bool(SEARCH_KEYWORDS) or bool(SEARCH_KEYWORD_GROUPS)
+    if has_keywords:
+        tracking_items, groups = search_keywords()
         if tracking_items:
-            tracking_report = summarize_keyword_tracking(tracking_items, SEARCH_KEYWORDS)
+            tracking_report = summarize_keyword_tracking(tracking_items, groups)
             if not tracking_report:
                 print("[WARN] Tracking summarization failed, sending raw list")
-                tracking_report = _build_tracking_fallback(tracking_items, SEARCH_KEYWORDS)
+                keywords = [kw for kws in (groups or {}).values() for kw in kws] or SEARCH_KEYWORDS
+                tracking_report = _build_tracking_fallback(tracking_items, keywords)
             send_telegram(tracking_report)
         else:
             print("[INFO] No tracking results found for keywords")
