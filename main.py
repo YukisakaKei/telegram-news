@@ -1,7 +1,12 @@
 import os
+import sys
 import json
 import time
 from datetime import datetime
+
+# 强制 stdout/stderr 使用 UTF-8，避免 Windows 下中文乱码
+sys.stdout.reconfigure(encoding="utf-8")
+sys.stderr.reconfigure(encoding="utf-8")
 
 from dotenv import load_dotenv
 load_dotenv()
