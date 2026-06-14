@@ -1,0 +1,37 @@
+name: AI News Bot
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 北京时间 10:00 (UTC+8)
+  workflow_dispatch:      # 手动触发
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore .env and prompts.json from Secrets
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          PROMPTS_JSON: ${{ secrets.PROMPTS_JSON }}
+        run: |
+          echo "$ENV_FILE" > .env
+          sed -i '/^HTTPS_PROXY/d' .env
+          echo "[INFO] .env restored ($(wc -c < .env) bytes)"
+          if [ -n "$PROMPTS_JSON" ]; then
+            echo "$PROMPTS_JSON" > prompts.json
+            echo "[INFO] prompts.json restored"
+          else
+            echo "[INFO] No custom prompts, using defaults"
+          fi
+
+      - name: Run bot
+        run: python main.py
