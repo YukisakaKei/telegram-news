@@ -159,15 +159,13 @@ def summarize_with_deepseek(news_items):
 
 【AI 日报】{now.strftime('%Y年%m月%d日')}
 
-★★★★★ **标题**
+★★★★★ **[标题](链接)**
 摘要：...
 影响：...
-🔗 链接
 
-★★★★☆ **标题**
+★★★★☆ **[标题](链接)**
 摘要：...
 影响：...
-🔗 链接
 """
 
     return _call_deepseek(prompt)
@@ -233,11 +231,10 @@ def summarize_keyword_tracking(tracking_items, keywords):
 
 追踪：{', '.join(keywords)}
 
-★★★★★ **标题**
+★★★★★ **[标题](链接)**
 摘要：...
 来源：新闻/论坛/社交媒体
 情感：正面/负面/中性
-🔗 链接
 
 ⚠️ 风险提示：（如有）
 
