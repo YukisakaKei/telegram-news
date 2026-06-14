@@ -26,7 +26,7 @@ main()
 - 通过 `python-dotenv` 从 `.env` 加载环境变量
 - `_parse_list()` 将逗号分隔字符串转为列表
 - 必需项：`DEEPSEEK_API_KEY`、`TG_BOT_TOKEN`、`TG_CHAT_ID`、`RSS_FEEDS`、`INTERESTS`
-- 可选项：`SEARCH_KEYWORDS`（为空则跳过关键词追踪）、`HTTPS_PROXY`、`SEARCH_TIME_RANGE`（时间范围，默认 `m`=月）、`SEARCH_MAX_RESULTS`（默认 10）
+- 可选项：`SEARCH_KEYWORDS`（为空则跳过关键词追踪）、`HTTPS_PROXY`、`SEARCH_TIME_RANGE`（时间范围，默认 `m`=月）、`SEARCH_MAX_RESULTS`（默认 10）、`TEST_MODE`（设为 `1` 则不发送 Telegram，输出保存到 `output/` 目录）
 
 ### 2. AI 日报 (`main.py:31-173`)
 
@@ -65,7 +65,8 @@ main()
 
 ```bash
 pip install -r requirements.txt
-python main.py
+python main.py                      # 正常模式，发送到 Telegram
+set TEST_MODE=1 && python main.py   # 测试模式，输出到 output/ 目录
 ```
 
 `run_bot.bat` 用于 Windows 计划任务，输出日志到 `logs/` 目录。

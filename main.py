@@ -19,6 +19,7 @@ INTERESTS = _parse_list(os.getenv("INTERESTS", ""))
 SEARCH_KEYWORDS = _parse_list(os.getenv("SEARCH_KEYWORDS", ""))
 SEARCH_MAX_RESULTS = int(os.getenv("SEARCH_MAX_RESULTS", "10"))
 SEARCH_TIME_RANGE = os.getenv("SEARCH_TIME_RANGE", "m")
+TEST_MODE = os.getenv("TEST_MODE", "").lower() in ("1", "true", "yes")
 
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
@@ -248,6 +249,10 @@ def send_telegram(text):
     if not text:
         return
 
+    if TEST_MODE:
+        _save_local_output(text)
+        return
+
     chunks = _split_text(text, TELEGRAM_MAX_LENGTH)
     for chunk in chunks:
         resp = requests.post(
@@ -265,6 +270,15 @@ def send_telegram(text):
         else:
             print(f"[ERROR] Telegram API error: {resp.status_code} {resp.text}")
             _send_fallback(chunk)
+
+
+def _save_local_output(text):
+    os.makedirs("output", exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = f"output/bot_{ts}.md"
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    print(f"[TEST] Output saved to {path} ({len(text)} chars)")
 
 
 def _send_fallback(text):
@@ -303,10 +317,11 @@ def validate_config():
     missing = []
     if not DEEPSEEK_API_KEY:
         missing.append("DEEPSEEK_API_KEY")
-    if not TG_BOT_TOKEN:
-        missing.append("TG_BOT_TOKEN")
-    if not TG_CHAT_ID:
-        missing.append("TG_CHAT_ID")
+    if not TEST_MODE:
+        if not TG_BOT_TOKEN:
+            missing.append("TG_BOT_TOKEN")
+        if not TG_CHAT_ID:
+            missing.append("TG_CHAT_ID")
     if not RSS_FEEDS:
         missing.append("RSS_FEEDS")
     if not INTERESTS:
