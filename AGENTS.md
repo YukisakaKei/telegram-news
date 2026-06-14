@@ -56,6 +56,8 @@ TEST_MODE=1 python main.py            # macOS/Linux
 | `main.py` | 全部机器人逻辑 |
 | `.env` | 密钥（gitignored） |
 | `.env.example` | 模板（已提交，无密钥） |
+| `prompts.json` | 提示词配置（gitignored） |
+| `prompts.example.json` | 提示词模板（已提交） |
 | `requirements.txt` | 依赖 |
 | `run_bot.bat` | Windows 计划任务入口 |
 | `ARCHITECTURE.md` | 项目逻辑文档 |

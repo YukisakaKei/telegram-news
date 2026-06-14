@@ -15,6 +15,85 @@ import feedparser
 import requests
 
 
+PROMPT_DEFAULTS = {
+    "daily_news": (
+        "你是一个专业的 AI 和科技领域新闻编辑。\n\n"
+        "用户的兴趣领域：{interests}\n\n"
+        "以下是今天抓取的新闻列表：\n\n"
+        "{items}\n\n"
+        "请完成以下任务：\n"
+        "1. 从中筛选出与用户兴趣最相关、最重要的 10 条新闻\n"
+        "2. 用中文为每条生成简洁摘要（1-2 句）\n"
+        "3. 给出简短的影响分析\n"
+        "4. 按重要性排序，用 ★ 评分（最高 ★★★★★，最低 ★★★☆☆）\n"
+        "5. 每条新闻必须保留原始链接\n\n"
+        "输出格式严格为（不要添加额外的前言后语）：\n\n"
+        "【AI 日报】{date}\n\n"
+        "★★★★★ **[标题](链接)**\n摘要：...\n影响：...\n\n"
+        "★★★★☆ **[标题](链接)**\n摘要：...\n影响：..."
+    ),
+    "keyword_tracking_group": (
+        "你是一个信息监控助手，帮助用户追踪特定主题的最新动态。\n\n"
+        "追踪主题：{group}\n"
+        "追踪关键词：{keywords}\n\n"
+        "以下是今天从网络搜索（新闻、论坛、社交媒体）中抓取到的相关信息：\n"
+        "{items}\n\n"
+        "请完成以下任务：\n"
+        "1. 筛选出最重要的 2-3 条信息\n"
+        "2. 用中文为每条生成简洁摘要（1-2 句）\n"
+        "3. 按重要性排序，用 ★ 评分\n"
+        "4. 判断情感倾向（正面/负面/中性）\n"
+        "5. ⚠️ 如果发现负面信息（投诉、维权、经营异常、资金链、跑路等），必须用 ⚠️ 特别标注并说明\n\n"
+        "输出格式严格为（不要添加额外的前言后语）：\n\n"
+        "## {group}\n\n"
+        "★★★★★ **[标题](链接)**\n摘要：...\n来源：新闻/论坛/社交媒体\n情感：正面/负面/中性\n\n"
+        "⚠️ 风险提示：（如有）"
+    ),
+    "keyword_tracking_flat": (
+        "你是一个信息监控助手，帮助用户追踪特定关键词的最新动态。\n\n"
+        "追踪关键词：{keywords}\n\n"
+        "以下是今天从网络搜索（新闻、论坛、社交媒体）中抓取到的相关信息：\n\n"
+        "{items}\n\n"
+        "请完成以下任务：\n"
+        "1. 筛选出最重要的 5-8 条信息\n"
+        "2. 用中文为每条生成简洁摘要（1-2 句）\n"
+        "3. 按重要性排序，用 ★ 评分\n"
+        "4. 判断情感倾向（正面/负面/中性）\n"
+        "5. ⚠️ 如果发现负面信息（投诉、维权、经营异常、资金链、跑路等），必须用 ⚠️ 特别标注并说明\n"
+        "6. 最后给出综合风险评估（低/中/高）\n\n"
+        "输出格式严格为（不要添加额外的前言后语）：\n\n"
+        "🔍 关键词追踪 {date}\n\n"
+        "追踪：{keywords}\n\n"
+        "★★★★★ **[标题](链接)**\n摘要：...\n来源：新闻/论坛/社交媒体\n情感：正面/负面/中性\n\n"
+        "⚠️ 风险提示：（如有）\n\n综合风险评估：低/中/高"
+    ),
+    "risk_assessment": (
+        "以下是根据各主题追踪结果，请给出一个综合风险评估（低/中/高），用一句话说明理由。\n\n"
+        "追踪结果摘要：\n{groups_summary}\n\n"
+        "输出格式严格为（不要添加额外的前言后语）：\n综合风险评估：低/中/高\n说明：..."
+    ),
+}
+
+
+def _load_prompts():
+    try:
+        with open("prompts.json", encoding="utf-8") as f:
+            loaded = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        loaded = {}
+    prompts = dict(PROMPT_DEFAULTS)
+    prompts.update(loaded)
+    return prompts
+
+
+def _build_prompt(key, **kwargs):
+    template = PROMPTS.get(key, PROMPT_DEFAULTS.get(key, ""))
+    return template.format(**kwargs)
+
+
+PROMPTS = _load_prompts()
+
+
 def _parse_list(env_val):
     return [x.strip() for x in env_val.split(",") if x.strip()]
 
@@ -183,34 +262,11 @@ def summarize_with_deepseek(news_items):
             news_text += f"   摘要: {item['summary'][:200]}\n"
 
     now = datetime.now()
-    prompt = f"""你是一个专业的 AI 和科技领域新闻编辑。
-
-用户的兴趣领域：{', '.join(INTERESTS)}
-
-以下是今天抓取的新闻列表：
-
-{news_text}
-
-请完成以下任务：
-1. 从中筛选出与用户兴趣最相关、最重要的 10 条新闻
-2. 用中文为每条生成简洁摘要（1-2 句）
-3. 给出简短的影响分析
-4. 按重要性排序，用 ★ 评分（最高 ★★★★★，最低 ★★★☆☆）
-5. 每条新闻必须保留原始链接
-
-输出格式严格为（不要添加额外的前言后语）：
-
-【AI 日报】{now.strftime('%Y年%m月%d日')}
-
-★★★★★ **[标题](链接)**
-摘要：...
-影响：...
-
-★★★★☆ **[标题](链接)**
-摘要：...
-影响：...
-"""
-
+    prompt = _build_prompt("daily_news",
+        interests=", ".join(INTERESTS),
+        date=now.strftime('%Y年%m月%d日'),
+        items=news_text,
+    )
     return _call_deepseek(prompt)
 
 
@@ -261,32 +317,11 @@ def summarize_keyword_tracking(tracking_items, groups=None):
                 if item["summary"]:
                     items_text += f"   摘要: {item['summary'][:200]}\n"
 
-            prompt = f"""你是一个信息监控助手，帮助用户追踪特定主题的最新动态。
-
-追踪主题：{gname}
-追踪关键词：{', '.join(kws)}
-
-以下是今天从网络搜索（新闻、论坛、社交媒体）中抓取到的相关信息：
-{items_text}
-
-请完成以下任务：
-1. 筛选出最重要的 2-3 条信息
-2. 用中文为每条生成简洁摘要（1-2 句）
-3. 按重要性排序，用 ★ 评分
-4. 判断情感倾向（正面/负面/中性）
-5. ⚠️ 如果发现负面信息（投诉、维权、经营异常、资金链、跑路等），必须用 ⚠️ 特别标注并说明
-
-输出格式严格为（不要添加额外的前言后语）：
-
-## {gname}
-
-★★★★★ **[标题](链接)**
-摘要：...
-来源：新闻/论坛/社交媒体
-情感：正面/负面/中性
-
-⚠️ 风险提示：（如有）
-"""
+            prompt = _build_prompt(f"group_{gname}" if f"group_{gname}" in PROMPTS else "keyword_tracking_group",
+                group=gname,
+                keywords=", ".join(kws),
+                items=items_text,
+            )
             print(f"[INFO] Calling DeepSeek for group '{gname}' ({len(group_items)} items)")
             result = _call_deepseek(prompt)
             if result:
@@ -294,16 +329,9 @@ def summarize_keyword_tracking(tracking_items, groups=None):
             else:
                 parts.append(f"\n## {gname}\n(摘要生成失败)")
 
-        # 总体风险评估
-        risk_prompt = f"""以下是根据各主题追踪结果，请给出一个综合风险评估（低/中/高），用一句话说明理由。
-
-追踪结果摘要：
-{chr(10).join(parts[-len(groups):])}
-
-输出格式严格为（不要添加额外的前言后语）：
-综合风险评估：低/中/高
-说明：...
-"""
+        risk_prompt = _build_prompt("risk_assessment",
+            groups_summary="\n".join(parts[-len(groups):]),
+        )
         risk_result = _call_deepseek(risk_prompt)
         if risk_result:
             parts.append(risk_result.strip())
@@ -319,38 +347,11 @@ def summarize_keyword_tracking(tracking_items, groups=None):
             if item["summary"]:
                 items_text += f"   摘要: {item['summary'][:200]}\n"
 
-        prompt = f"""你是一个信息监控助手，帮助用户追踪特定关键词的最新动态。
-
-追踪关键词：{', '.join(keywords)}
-
-以下是今天从网络搜索（新闻、论坛、社交媒体）中抓取到的相关信息：
-
-{items_text}
-
-请完成以下任务：
-1. 筛选出最重要的 5-8 条信息
-2. 用中文为每条生成简洁摘要（1-2 句）
-3. 按重要性排序，用 ★ 评分
-4. 判断情感倾向（正面/负面/中性）
-5. ⚠️ 如果发现负面信息（投诉、维权、经营异常、资金链、跑路等），必须用 ⚠️ 特别标注并说明
-6. 最后给出综合风险评估（低/中/高）
-
-输出格式严格为（不要添加额外的前言后语）：
-
-🔍 关键词追踪 {now.strftime('%Y年%m月%d日')}
-
-追踪：{', '.join(keywords)}
-
-★★★★★ **[标题](链接)**
-摘要：...
-来源：新闻/论坛/社交媒体
-情感：正面/负面/中性
-
-⚠️ 风险提示：（如有）
-
-综合风险评估：低/中/高
-"""
-
+        prompt = _build_prompt("keyword_tracking_flat",
+            keywords=", ".join(keywords),
+            date=now.strftime('%Y年%m月%d日'),
+            items=items_text,
+        )
         return _call_deepseek(prompt)
 
 
