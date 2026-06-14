@@ -321,11 +321,15 @@ def summarize_keyword_tracking(tracking_items, groups=None):
     now = datetime.now()
 
     if groups:
-        parts = [f"🔍 关键词追踪 {now.strftime('%Y年%m月%d日')}"]
+        messages = []
+        group_summaries = []
+
         for gname, kws in groups.items():
             group_items = [it for it in tracking_items if it.get("group") == gname]
             if not group_items:
-                parts.append(f"\n## {gname}\n(无相关结果)")
+                msg = f"## {gname}\n(无相关结果)"
+                messages.append(msg)
+                group_summaries.append(msg)
                 continue
 
             items_text = ""
@@ -343,18 +347,24 @@ def summarize_keyword_tracking(tracking_items, groups=None):
             print(f"[INFO] Calling DeepSeek for group '{gname}' ({len(group_items)} items)")
             result = _call_deepseek(prompt)
             if result:
-                parts.append(result.strip())
+                msg = result.strip()
             else:
-                parts.append(f"\n## {gname}\n(摘要生成失败)")
+                msg = f"## {gname}\n(摘要生成失败)"
+            messages.append(msg)
+            group_summaries.append(msg)
 
-        risk_prompt = _build_prompt("risk_assessment",
-            groups_summary="\n".join(parts[-len(groups):]),
-        )
-        risk_result = _call_deepseek(risk_prompt)
-        if risk_result:
-            parts.append(risk_result.strip())
+        if messages:
+            messages[0] = f"🔍 关键词追踪 {now.strftime('%Y年%m月%d日')}\n\n{messages[0]}"
 
-        return "\n".join(parts)
+        if group_summaries:
+            risk_prompt = _build_prompt("risk_assessment",
+                groups_summary="\n".join(group_summaries),
+            )
+            risk_result = _call_deepseek(risk_prompt)
+            if risk_result:
+                messages.append(risk_result.strip())
+
+        return messages
 
     else:
         keywords = SEARCH_KEYWORDS
@@ -483,11 +493,17 @@ def main():
         tracking_items, groups = search_keywords()
         if tracking_items:
             tracking_report = summarize_keyword_tracking(tracking_items, groups)
-            if not tracking_report:
+            if tracking_report:
+                if isinstance(tracking_report, list):
+                    for msg in tracking_report:
+                        send_telegram(msg)
+                else:
+                    send_telegram(tracking_report)
+            else:
                 print("[WARN] Tracking summarization failed, sending raw list")
                 keywords = [kw for kws in (groups or {}).values() for kw in kws] or SEARCH_KEYWORDS
                 tracking_report = _build_tracking_fallback(tracking_items, keywords)
-            send_telegram(tracking_report)
+                send_telegram(tracking_report)
         else:
             print("[INFO] No tracking results found for keywords")
 
