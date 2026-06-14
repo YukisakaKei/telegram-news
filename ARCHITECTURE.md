@@ -39,7 +39,7 @@ main()
 **summarize_with_deepseek()** — AI 摘要
 - 将所有新闻拼接为编号列表，附带用户兴趣关键词
 - Prompt 要求：筛选 10 条最相关新闻 → 中文摘要 → 影响分析 → ★ 评分排序
-- 模型 `deepseek-chat`，temperature=0.3，max_tokens=4000
+- 模型 `deepseek-v4-pro`，temperature=0.3，max_tokens=4000
 - 失败时降级为原始列表 (`_build_fallback_report`)
 
 ### 3. 关键词追踪
@@ -231,7 +231,7 @@ set TEST_MODE=1 && python main.py   # 测试模式，输出到 output/ 目录
 
 | 参数 | 值 | 说明 |
 |------|-----|------|
-| 模型 | `deepseek-chat` | DeepSeek 标准对话模型 |
+| 模型 | `deepseek-v4-pro` | DeepSeek V4 Pro 模型 |
 | temperature | 0.3 | 低随机性，保证输出稳定 |
 | max_tokens | 4000 | 足够生成完整日报 |
 | 接口 | `https://api.deepseek.com/v1/chat/completions` | OpenAI 兼容格式 |
@@ -243,7 +243,7 @@ AI 摘要失败时，直接发送原始新闻列表（`_build_fallback_report` /
 
 ### 上下文大小分析
 
-> deepseek-chat 上下文窗口为 **128K tokens**，以下均为安全范围。
+> deepseek-v4-pro 上下文窗口为 **128K tokens**，以下均为安全范围。
 
 **AI 日报 Prompt 体积：**
 
