@@ -488,24 +488,29 @@ def main():
         send_telegram("⚠️ 今日新闻抓取失败，请检查 RSS 源。")
 
     # 关键词追踪
-    has_keywords = bool(SEARCH_KEYWORDS) or bool(SEARCH_KEYWORD_GROUPS)
-    if has_keywords:
-        tracking_items, groups = search_keywords()
-        if tracking_items:
-            tracking_report = summarize_keyword_tracking(tracking_items, groups)
-            if tracking_report:
-                if isinstance(tracking_report, list):
-                    for msg in tracking_report:
-                        send_telegram(msg)
+    try:
+        has_keywords = bool(SEARCH_KEYWORDS) or bool(SEARCH_KEYWORD_GROUPS)
+        if has_keywords:
+            tracking_items, groups = search_keywords()
+            if tracking_items:
+                tracking_report = summarize_keyword_tracking(tracking_items, groups)
+                if tracking_report:
+                    if isinstance(tracking_report, list):
+                        for msg in tracking_report:
+                            send_telegram(msg)
+                    else:
+                        send_telegram(tracking_report)
                 else:
+                    print("[WARN] Tracking summarization failed, sending raw list")
+                    keywords = [kw for kws in (groups or {}).values() for kw in kws] or SEARCH_KEYWORDS
+                    tracking_report = _build_tracking_fallback(tracking_items, keywords)
                     send_telegram(tracking_report)
             else:
-                print("[WARN] Tracking summarization failed, sending raw list")
-                keywords = [kw for kws in (groups or {}).values() for kw in kws] or SEARCH_KEYWORDS
-                tracking_report = _build_tracking_fallback(tracking_items, keywords)
-                send_telegram(tracking_report)
-        else:
-            print("[INFO] No tracking results found for keywords")
+                print("[INFO] No tracking results found for keywords")
+    except Exception as e:
+        import traceback
+        print(f"[ERROR] Keyword tracking crashed: {e}")
+        traceback.print_exc()
 
     print(f"[DONE] AI News Bot finished - {datetime.now().isoformat()}")
 
@@ -513,7 +518,8 @@ def main():
 def _build_fallback_report(items):
     now = datetime.now()
     lines = [f"【AI 日报】{now.strftime('%Y年%m月%d日')}", ""]
-    lines.append("(AI 摘要生成失败，以下是原始新闻列表)", "")
+    lines.append("(AI 摘要生成失败，以下是原始新闻列表)")
+    lines.append("")
     for i, item in enumerate(items[:15]):
         lines.append(f"{i + 1}. [{item['title']}]({item['link']})")
     return "\n".join(lines)
@@ -522,8 +528,10 @@ def _build_fallback_report(items):
 def _build_tracking_fallback(items, keywords):
     now = datetime.now()
     lines = [f"🔍 关键词追踪 {now.strftime('%Y年%m月%d日')}", ""]
-    lines.append(f"追踪：{', '.join(keywords)}", "")
-    lines.append("(AI 摘要生成失败，以下是原始搜索结果)", "")
+    lines.append(f"追踪：{', '.join(keywords)}")
+    lines.append("")
+    lines.append("(AI 摘要生成失败，以下是原始搜索结果)")
+    lines.append("")
     for i, item in enumerate(items[:15]):
         src = item.get("source", "web")
         lines.append(f"{i + 1}. [{item['title']}]({item['link']}) [{src}]")
