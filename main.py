@@ -244,20 +244,72 @@ def summarize_keyword_tracking(tracking_items, groups=None):
     if not tracking_items:
         return None
 
+    now = datetime.now()
+
     if groups:
-        items_text = ""
+        parts = [f"🔍 关键词追踪 {now.strftime('%Y年%m月%d日')}"]
         for gname, kws in groups.items():
             group_items = [it for it in tracking_items if it.get("group") == gname]
             if not group_items:
+                parts.append(f"\n## {gname}\n(无相关结果)")
                 continue
-            items_text += f"\n## {gname}\n"
+
+            items_text = ""
             for i, item in enumerate(group_items):
                 src = item.get("source", "web")
-                items_text += f"{len(items_text.splitlines())}. [{item['title']}]({item['link']}) [{src}]\n"
+                items_text += f"{i + 1}. [{item['title']}]({item['link']}) [{src}]\n"
                 if item["summary"]:
                     items_text += f"   摘要: {item['summary'][:200]}\n"
-        keywords = [kw for kws in groups.values() for kw in kws]
-        groups_section = "，".join(f"{g}: {', '.join(kws)}" for g, kws in groups.items())
+
+            prompt = f"""你是一个信息监控助手，帮助用户追踪特定主题的最新动态。
+
+追踪主题：{gname}
+追踪关键词：{', '.join(kws)}
+
+以下是今天从网络搜索（新闻、论坛、社交媒体）中抓取到的相关信息：
+{items_text}
+
+请完成以下任务：
+1. 筛选出最重要的 2-3 条信息
+2. 用中文为每条生成简洁摘要（1-2 句）
+3. 按重要性排序，用 ★ 评分
+4. 判断情感倾向（正面/负面/中性）
+5. ⚠️ 如果发现负面信息（投诉、维权、经营异常、资金链、跑路等），必须用 ⚠️ 特别标注并说明
+
+输出格式严格为（不要添加额外的前言后语）：
+
+## {gname}
+
+★★★★★ **[标题](链接)**
+摘要：...
+来源：新闻/论坛/社交媒体
+情感：正面/负面/中性
+
+⚠️ 风险提示：（如有）
+"""
+            print(f"[INFO] Calling DeepSeek for group '{gname}' ({len(group_items)} items)")
+            result = _call_deepseek(prompt)
+            if result:
+                parts.append(result.strip())
+            else:
+                parts.append(f"\n## {gname}\n(摘要生成失败)")
+
+        # 总体风险评估
+        risk_prompt = f"""以下是根据各主题追踪结果，请给出一个综合风险评估（低/中/高），用一句话说明理由。
+
+追踪结果摘要：
+{chr(10).join(parts[-len(groups):])}
+
+输出格式严格为（不要添加额外的前言后语）：
+综合风险评估：低/中/高
+说明：...
+"""
+        risk_result = _call_deepseek(risk_prompt)
+        if risk_result:
+            parts.append(risk_result.strip())
+
+        return "\n".join(parts)
+
     else:
         keywords = SEARCH_KEYWORDS
         items_text = ""
@@ -266,49 +318,7 @@ def summarize_keyword_tracking(tracking_items, groups=None):
             items_text += f"{i + 1}. [{item['title']}]({item['link']}) [{src}]\n"
             if item["summary"]:
                 items_text += f"   摘要: {item['summary'][:200]}\n"
-        groups_section = None
 
-    now = datetime.now()
-    if groups:
-        prompt = f"""你是一个信息监控助手，帮助用户追踪特定关键词的最新动态。
-
-追踪主题分组：
-{groups_section}
-
-以下是今天从网络搜索（新闻、论坛、社交媒体）中抓取到的相关信息，已按主题分组：
-{items_text}
-
-请完成以下任务：
-1. 每个主题筛选出最重要的 2-3 条信息
-2. 用中文为每条生成简洁摘要（1-2 句）
-3. 按重要性排序，用 ★ 评分
-4. 判断情感倾向（正面/负面/中性）
-5. ⚠️ 如果发现负面信息（投诉、维权、经营异常、资金链、跑路等），必须用 ⚠️ 特别标注并说明
-6. 最后给出综合风险评估（低/中/高）
-
-输出格式严格为（不要添加额外的前言后语）：
-
-🔍 关键词追踪 {now.strftime('%Y年%m月%d日')}
-
-## {list(groups.keys())[0] if groups else ''}
-
-★★★★★ **[标题](链接)**
-摘要：...
-来源：新闻/论坛/社交媒体
-情感：正面/负面/中性
-
-⚠️ 风险提示：（如有）
-
-## {list(groups.keys())[1] if len(groups) > 1 else ''}
-
-★★★★★ **[标题](链接)**
-摘要：...
-来源：新闻/论坛/社交媒体
-情感：正面/负面/中性
-
-综合风险评估：低/中/高
-"""
-    else:
         prompt = f"""你是一个信息监控助手，帮助用户追踪特定关键词的最新动态。
 
 追踪关键词：{', '.join(keywords)}
@@ -341,7 +351,7 @@ def summarize_keyword_tracking(tracking_items, groups=None):
 综合风险评估：低/中/高
 """
 
-    return _call_deepseek(prompt)
+        return _call_deepseek(prompt)
 
 
 def send_telegram(text):
