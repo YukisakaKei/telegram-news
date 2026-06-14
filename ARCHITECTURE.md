@@ -14,21 +14,22 @@ main()
 │   ├── summarize_with_deepseek()  # 调用 DeepSeek 筛选 10 条、生成中文摘要 + 影响分析 + ★ 评分
 │   └── send_telegram()      # 按 Markdown 格式发送，超 4000 字自动分段
 └── [关键词追踪]
-    ├── search_keywords()    # 每个关键词分别搜索 Google News RSS + Bing 网页
-    ├── summarize_keyword_tracking()  # DeepSeek 筛选 5-8 条、情感判定、风险标注
+    ├── search_keywords()         # 每个关键词分别搜索 Google News RSS + Bing 网页
+    ├── summarize_keyword_tracking()  # 分组模式：每组独立 AI 调用 → 综合风险评估
+    │                               # 平铺模式：单次 AI 调用（筛选、情感、风险）
     └── send_telegram()
 ```
 
 ## 模块详解
 
-### 1. 配置加载 (`main.py:1-27`)
+### 1. 配置加载
 
 - 通过 `python-dotenv` 从 `.env` 加载环境变量
 - `_parse_list()` 将逗号分隔字符串转为列表
 - 必需项：`DEEPSEEK_API_KEY`、`TG_BOT_TOKEN`、`TG_CHAT_ID`、`RSS_FEEDS`、`INTERESTS`
-- 可选项：`SEARCH_KEYWORDS`（为空则跳过关键词追踪）、`HTTPS_PROXY`、`SEARCH_TIME_RANGE`（时间范围，默认 `m`=月）、`SEARCH_MAX_RESULTS`（默认 10）、`TEST_MODE`（设为 `1` 则不发送 Telegram，输出保存到 `output/` 目录）
+- 可选项：`SEARCH_KEYWORD_GROUPS`（格式：`组名:关键词1,关键词2;组名:关键词3`，与 `SEARCH_KEYWORDS` 二选一，分组模式会为每组单独调用 AI 并生成综合风险评估）、`SEARCH_KEYWORDS`（逗号分隔，为空则跳过关键词追踪，与 `SEARCH_KEYWORD_GROUPS` 二选一）、`HTTPS_PROXY`、`SEARCH_TIME_RANGE`（时间范围，默认 `m`=月）、`SEARCH_MAX_RESULTS`（默认 10）、`TEST_MODE`（设为 `1` 则不发送 Telegram，输出保存到 `output/` 目录）
 
-### 2. AI 日报 (`main.py:31-173`)
+### 2. AI 日报
 
 **fetch_all_news()** — RSS 抓取
 - 使用 `feedparser` 解析每个 RSS 源
@@ -41,19 +42,27 @@ main()
 - 模型 `deepseek-chat`，temperature=0.3，max_tokens=4000
 - 失败时降级为原始列表 (`_build_fallback_report`)
 
-### 3. 关键词追踪 (`main.py:65-246`)
+### 3. 关键词追踪
 
 **search_keywords()** — 双引擎搜索
-- **Google News RSS**：`https://news.google.com/rss/search?q=<keyword>&hl=zh-CN`，代码层按 `SEARCH_TIME_RANGE` 过滤日期
+- 支持两种模式：**分组模式**（`SEARCH_KEYWORD_GROUPS`，格式 `组名:关键词1,关键词2;组名:关键词3`）和**平铺模式**（`SEARCH_KEYWORDS`，逗号分隔），两者二选一
+- **Google News RSS**：`https://news.google.com/rss/search?q=<keyword>&hl=zh-CN&gl=CN&ceid=CN:zh-Hans`，代码层按 `SEARCH_TIME_RANGE` 过滤日期
 - **Bing 网页搜索**：直连 `www.bing.com`，正则解析 `<li class="b_algo">` 块提取标题/链接/摘要，通过 `tbs=qdr:m` 限制时间范围
-- 每条结果标注来源 `news` 或 `web`
+- 每条结果标注来源 `news` 或 `web`，分组模式下额外标注所属分组
 
 **summarize_keyword_tracking()** — 舆情分析
-- Prompt 要求：筛选 5-8 条 → 中文摘要 → 情感判定（正面/负面/中性）
-- 特殊逻辑：检测投诉、维权、经营异常等负面信息，用 ⚠️ 标注
-- 最后输出综合风险评估（低/中/高）
 
-### 4. Telegram 推送 (`main.py:249-301`)
+- **平铺模式**（未设置 `SEARCH_KEYWORD_GROUPS`）：单次 AI 调用，使用 `keyword_tracking_flat` prompt
+  - 筛选 5-8 条 → 中文摘要 → 情感判定（正面/负面/中性）
+  - 检测投诉、维权、经营异常等负面信息，用 ⚠️ 标注
+  - 输出综合风险评估（低/中/高）
+
+- **分组模式**（设置了 `SEARCH_KEYWORD_GROUPS`）：N+1 次 AI 调用
+  - 每个分组单独调用，使用 `keyword_tracking_group` prompt（筛选 2-3 条，不包含风险评估）
+  - 可在 `prompts.json` 中配置 `group_{组名}` 自定义 prompt 覆盖默认
+  - 最后调用 `risk_assessment` prompt 综合所有分组结果生成整体风险评估
+
+### 4. Telegram 推送
 
 - 使用 Bot API `sendMessage`，`parse_mode: "Markdown"`
 - 超 4000 字符自动按行拆分为多条消息 (`_split_text`)
@@ -73,15 +82,15 @@ set TEST_MODE=1 && python main.py   # 测试模式，输出到 output/ 目录
 
 ### GitHub Actions（远程）
 
-通过 `.github/workflows/daily_news.yml` 定时触发，密钥存于 GitHub Secrets。
+> 暂未实现，计划通过 `.github/workflows/daily_news.yml` 定时触发，密钥存于 GitHub Secrets。
 
 ## 网络要求
 
 | 服务 | 访问方式 |
 |------|---------|
-| RSS 源 | 直连 |
+| RSS 订阅源（`RSS_FEEDS`） | 直连 |
 | Bing 搜索 | 直连 |
-| Google News | 需代理（`HTTPS_PROXY`） |
+| Google News RSS 搜索 | 需代理（`HTTPS_PROXY`） |
 | DeepSeek API | 直连 |
 | Telegram API | 需代理（`HTTPS_PROXY`） |
 
@@ -89,7 +98,7 @@ set TEST_MODE=1 && python main.py   # 测试模式，输出到 output/ 目录
 
 ### 对话模式
 
-两次独立的 API 调用，每次都是一轮问答（无上下文、无历史），通过精心设计的 Prompt 控制输出。
+两次独立的 API 调用（分组模式下为 N+2 次），每次都是一轮问答（无上下文、无历史），通过精心设计的 Prompt 控制输出。
 
 ### 调用 1：AI 日报（`summarize_with_deepseek`）
 
@@ -97,7 +106,7 @@ set TEST_MODE=1 && python main.py   # 测试模式，输出到 output/ 目录
 ```text
 你是一个专业的 AI 和科技领域新闻编辑。
 
-用户的兴趣领域：AI, Agent, Automation, Python, Startup, SaaS
+用户的兴趣领域：{interests}
 
 以下是今天抓取的新闻列表：
 
@@ -146,6 +155,10 @@ set TEST_MODE=1 && python main.py   # 测试模式，输出到 output/ 目录
 
 ### 调用 2：关键词追踪（`summarize_keyword_tracking`）
 
+支持两种模式：
+
+#### 平铺模式（仅设置 `SEARCH_KEYWORDS`）
+
 **提供给 AI 的信息：**
 ```text
 你是一个信息监控助手，帮助用户追踪特定关键词的最新动态。
@@ -181,6 +194,21 @@ set TEST_MODE=1 && python main.py   # 测试模式，输出到 output/ 目录
 
 综合风险评估：低/中/高
 ```
+
+#### 分组模式（设置 `SEARCH_KEYWORD_GROUPS`）
+
+每组独立调用 AI（使用 `keyword_tracking_group` prompt），筛选 2-3 条，格式如下：
+
+```
+## {组名}
+
+★★★★★ **[标题](链接)**
+摘要：...
+来源：新闻/论坛/社交媒体
+情感：正面/负面/中性
+```
+
+所有分组完成后，额外调用 `risk_assessment` prompt 综合生成整体风险评估。可通过 `prompts.json` 中的 `group_{组名}` 键为特定分组覆盖自定义 prompt。
 
 **期望得到的信息：**
 ```text
@@ -242,6 +270,48 @@ MAX_TOTAL_ITEMS = 60 条新闻
 **结论：** 当前规模下没有任何上下文溢出风险。即使 RSS 源数量和关键词数量大幅增加，也有充足余量。
 
 ---
+
+## 提示词自定义
+
+所有 AI 提示词定义在 `main.py` 的 `PROMPT_DEFAULTS` 字典中，可通过 `prompts.json` 文件覆盖。
+
+### 工作原理
+
+1. `_load_prompts()` 从 `prompts.json` 加载自定义提示词，与默认值合并
+2. `_build_prompt(key, **kwargs)` 通过 key 获取模板，用 `str.format()` 替换占位符
+3. 如果 `prompts.json` 不存在或解析失败，回退使用 `PROMPT_DEFAULTS`
+
+### 支持的 key
+
+| Key | 用途 |
+|-----|------|
+| `daily_news` | AI 日报 prompt |
+| `keyword_tracking_group` | 分组追踪 prompt（每个分组独立调用）|
+| `keyword_tracking_flat` | 平铺追踪 prompt（不分组的模式）|
+| `risk_assessment` | 综合风险评估 prompt（仅分组模式使用）|
+| `group_{组名}` | 自定义分组 prompt，覆盖 `keyword_tracking_group` |
+
+### 示例
+
+`prompts.example.json` 提供了完整的模板参考，复制为 `prompts.json` 后可按需修改。
+
+自定义分组 prompt 示例（`prompts.json`）：
+```json
+{
+  "group_游戏": "你是游戏行业观察员，请从以下信息中筛选 2-3 条最重要的动态..."
+}
+```
+
+### 支持的占位符
+
+| 占位符 | 用于 |
+|--------|------|
+| `{interests}` | `daily_news` |
+| `{date}` | `daily_news`, `keyword_tracking_flat` |
+| `{items}` | `daily_news`, `keyword_tracking_group`, `keyword_tracking_flat` |
+| `{group}` | `keyword_tracking_group` |
+| `{keywords}` | `keyword_tracking_group`, `keyword_tracking_flat` |
+| `{groups_summary}` | `risk_assessment` |
 
 ## 依赖
 
