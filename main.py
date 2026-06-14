@@ -7,16 +7,16 @@ import feedparser
 import requests
 
 
+def _parse_list(env_val):
+    return [x.strip() for x in env_val.split(",") if x.strip()]
+
+
 RSS_FEEDS = _parse_list(os.getenv("RSS_FEEDS", ""))
 INTERESTS = _parse_list(os.getenv("INTERESTS", ""))
 
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
 TG_CHAT_ID = os.getenv("TG_CHAT_ID")
-
-
-def _parse_list(env_val):
-    return [x.strip() for x in env_val.split(",") if x.strip()]
 
 MAX_ITEMS_PER_FEED = 10
 MAX_TOTAL_ITEMS = 60
