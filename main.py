@@ -3,6 +3,9 @@ import json
 import time
 from datetime import datetime
 
+from dotenv import load_dotenv
+load_dotenv()
+
 import feedparser
 import requests
 
