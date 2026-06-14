@@ -134,9 +134,7 @@ def summarize_with_deepseek(news_items):
 
     news_text = ""
     for i, item in enumerate(news_items):
-        src = f" [{item.get('source', 'rss')}]" if item.get('source') else ""
-        kw = f" 🔍{item['keyword']}" if item.get('keyword') else ""
-        news_text += f"{i + 1}. [{item['title']}]({item['link']}){src}{kw}\n"
+        news_text += f"{i + 1}. [{item['title']}]({item['link']})\n"
         if item["summary"]:
             news_text += f"   摘要: {item['summary'][:200]}\n"
 
@@ -145,17 +143,16 @@ def summarize_with_deepseek(news_items):
 
 用户的兴趣领域：{', '.join(INTERESTS)}
 
-以下是今天抓取的新闻列表（带有🔍标记的来自用户的追踪关键词搜索）：
+以下是今天抓取的新闻列表：
 
 {news_text}
 
 请完成以下任务：
 1. 从中筛选出与用户兴趣最相关、最重要的 10 条新闻
-2. 如果有关键词追踪结果（🔍标记），也在末尾列出最重要的 5 条
-3. 用中文为每条生成简洁摘要（1-2 句）
-4. 给出简短的影响分析
-5. 按重要性排序，用 ★ 评分（最高 ★★★★★，最低 ★★★☆☆）
-6. 每条新闻必须保留原始链接
+2. 用中文为每条生成简洁摘要（1-2 句）
+3. 给出简短的影响分析
+4. 按重要性排序，用 ★ 评分（最高 ★★★★★，最低 ★★★☆☆）
+5. 每条新闻必须保留原始链接
 
 输出格式严格为（不要添加额外的前言后语）：
 
@@ -172,6 +169,10 @@ def summarize_with_deepseek(news_items):
 🔗 链接
 """
 
+    return _call_deepseek(prompt)
+
+
+def _call_deepseek(prompt):
     headers = {
         "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
         "Content-Type": "application/json",
@@ -194,8 +195,55 @@ def summarize_with_deepseek(news_items):
         return None
 
     data = resp.json()
-    content = data["choices"][0]["message"]["content"]
-    return content
+    return data["choices"][0]["message"]["content"]
+
+
+def summarize_keyword_tracking(tracking_items, keywords):
+    if not tracking_items:
+        return None
+
+    items_text = ""
+    for i, item in enumerate(tracking_items):
+        src = item.get("source", "web")
+        items_text += f"{i + 1}. [{item['title']}]({item['link']}) [{src}]\n"
+        if item["summary"]:
+            items_text += f"   摘要: {item['summary'][:200]}\n"
+
+    now = datetime.now()
+    prompt = f"""你是一个信息监控助手，帮助用户追踪特定关键词的最新动态。
+
+追踪关键词：{', '.join(keywords)}
+
+以下是今天从网络搜索（新闻、论坛、社交媒体）中抓取到的相关信息：
+
+{items_text}
+
+请完成以下任务：
+1. 筛选出最重要的 5-8 条信息
+2. 用中文为每条生成简洁摘要（1-2 句）
+3. 按重要性排序，用 ★ 评分
+4. 判断情感倾向（正面/负面/中性）
+5. ⚠️ 如果发现负面信息（投诉、维权、经营异常、资金链、跑路等），必须用 ⚠️ 特别标注并说明
+6. 最后给出综合风险评估（低/中/高）
+
+输出格式严格为（不要添加额外的前言后语）：
+
+🔍 关键词追踪 {now.strftime('%Y年%m月%d日')}
+
+追踪：{', '.join(keywords)}
+
+★★★★★ **标题**
+摘要：...
+来源：新闻/论坛/社交媒体
+情感：正面/负面/中性
+🔗 链接
+
+⚠️ 风险提示：（如有）
+
+综合风险评估：低/中/高
+"""
+
+    return _call_deepseek(prompt)
 
 
 def send_telegram(text):
@@ -277,31 +325,29 @@ def main():
     if not validate_config():
         return
 
+    # AI 日报
     news_items = fetch_all_news()
-
-    search_items = search_keywords()
-    if search_items:
-        news_items.extend(search_items)
-        seen = set()
-        unique = []
-        for item in news_items:
-            key = item.get("link", "") or item.get("title", "")
-            if key not in seen:
-                seen.add(key)
-                unique.append(item)
-        news_items = unique[:MAX_TOTAL_ITEMS]
-
-    if not news_items:
-        print("[WARN] No news fetched, sending error notification")
+    if news_items:
+        report = summarize_with_deepseek(news_items)
+        if not report:
+            print("[WARN] AI summarization failed, sending raw news list")
+            report = _build_fallback_report(news_items)
+        send_telegram(report)
+    else:
         send_telegram("⚠️ 今日新闻抓取失败，请检查 RSS 源。")
-        return
 
-    report = summarize_with_deepseek(news_items)
-    if not report:
-        print("[WARN] Summarization failed, sending raw news list as fallback")
-        report = _build_fallback_report(news_items)
+    # 关键词追踪
+    if SEARCH_KEYWORDS:
+        tracking_items = search_keywords()
+        if tracking_items:
+            tracking_report = summarize_keyword_tracking(tracking_items, SEARCH_KEYWORDS)
+            if not tracking_report:
+                print("[WARN] Tracking summarization failed, sending raw list")
+                tracking_report = _build_tracking_fallback(tracking_items, SEARCH_KEYWORDS)
+            send_telegram(tracking_report)
+        else:
+            print("[INFO] No tracking results found for keywords")
 
-    send_telegram(report)
     print(f"[DONE] AI News Bot finished - {datetime.now().isoformat()}")
 
 
@@ -311,6 +357,17 @@ def _build_fallback_report(items):
     lines.append("(AI 摘要生成失败，以下是原始新闻列表)", "")
     for i, item in enumerate(items[:15]):
         lines.append(f"{i + 1}. [{item['title']}]({item['link']})")
+    return "\n".join(lines)
+
+
+def _build_tracking_fallback(items, keywords):
+    now = datetime.now()
+    lines = [f"🔍 关键词追踪 {now.strftime('%Y年%m月%d日')}", ""]
+    lines.append(f"追踪：{', '.join(keywords)}", "")
+    lines.append("(AI 摘要生成失败，以下是原始搜索结果)", "")
+    for i, item in enumerate(items[:15]):
+        src = item.get("source", "web")
+        lines.append(f"{i + 1}. [{item['title']}]({item['link']}) [{src}]")
     return "\n".join(lines)
 
 
