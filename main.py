@@ -167,22 +167,40 @@ def _strip_html(text):
 
 def _search_google_news(keyword, items, group=None):
     import urllib.parse
+    from datetime import timedelta
+
     encoded = urllib.parse.quote(keyword)
     url = f"https://news.google.com/rss/search?q={encoded}&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
     feed = feedparser.parse(url)
-    for entry in feed.entries[:5]:
+
+    days_map = {"d": 1, "w": 7, "m": 30}
+    cutoff = datetime.now() - timedelta(days=days_map.get(SEARCH_TIME_RANGE, 30))
+
+    count = 0
+    for entry in feed.entries:
+        if count >= 5:
+            break
+        published_str = entry.get("published", "")
+        if published_str:
+            try:
+                published_dt = datetime(*entry.published_parsed[:6])
+                if published_dt < cutoff:
+                    continue
+            except Exception:
+                pass
         title = entry.get("title", "").strip()
         link = entry.get("link", "").strip()
         summary = _strip_html(entry.get("summary", "") or entry.get("description", ""))[:300]
         item = {
             "title": title, "link": link, "summary": summary,
-            "published": entry.get("published", ""),
+            "published": published_str,
             "source": "news", "keyword": keyword,
         }
         if group:
             item["group"] = group
         items.append(item)
-    print(f"[INFO] Google News: {len(feed.entries[:5])} results for '{keyword}'")
+        count += 1
+    print(f"[INFO] Google News: {count} results for '{keyword}'")
 
 
 def _search_bing_web(keyword, max_results, items, group=None):

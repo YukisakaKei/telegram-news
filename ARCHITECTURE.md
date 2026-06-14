@@ -44,8 +44,8 @@ main()
 ### 3. 关键词追踪 (`main.py:65-246`)
 
 **search_keywords()** — 双引擎搜索
-- **Google News RSS**：`https://news.google.com/rss/search?q=<keyword>&hl=zh-CN`
-- **Bing 网页搜索**：直连 `www.bing.com`，正则解析 `<li class="b_algo">` 块提取标题/链接/摘要，通过 `tbs=qdr:m` 限制时间范围为最近一个月
+- **Google News RSS**：`https://news.google.com/rss/search?q=<keyword>&hl=zh-CN`，代码层按 `SEARCH_TIME_RANGE` 过滤日期
+- **Bing 网页搜索**：直连 `www.bing.com`，正则解析 `<li class="b_algo">` 块提取标题/链接/摘要，通过 `tbs=qdr:m` 限制时间范围
 - 每条结果标注来源 `news` 或 `web`
 
 **summarize_keyword_tracking()** — 舆情分析
