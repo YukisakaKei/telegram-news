@@ -26,7 +26,7 @@ main()
 - 通过 `python-dotenv` 从 `.env` 加载环境变量
 - `_parse_list()` 将逗号分隔字符串转为列表
 - 必需项：`DEEPSEEK_API_KEY`、`TG_BOT_TOKEN`、`TG_CHAT_ID`、`RSS_FEEDS`、`INTERESTS`
-- 可选项：`SEARCH_KEYWORDS`（为空则跳过关键词追踪）、`HTTPS_PROXY`
+- 可选项：`SEARCH_KEYWORDS`（为空则跳过关键词追踪）、`HTTPS_PROXY`、`SEARCH_TIME_RANGE`（时间范围，默认 `m`=月）、`SEARCH_MAX_RESULTS`（默认 10）
 
 ### 2. AI 日报 (`main.py:31-173`)
 
@@ -45,7 +45,7 @@ main()
 
 **search_keywords()** — 双引擎搜索
 - **Google News RSS**：`https://news.google.com/rss/search?q=<keyword>&hl=zh-CN`
-- **Bing 网页搜索**：直连 `www.bing.com`，正则解析 `<li class="b_algo">` 块提取标题/链接/摘要
+- **Bing 网页搜索**：直连 `www.bing.com`，正则解析 `<li class="b_algo">` 块提取标题/链接/摘要，通过 `tbs=qdr:m` 限制时间范围为最近一个月
 - 每条结果标注来源 `news` 或 `web`
 
 **summarize_keyword_tracking()** — 舆情分析
@@ -83,6 +83,163 @@ python main.py
 | Google News | 需代理（`HTTPS_PROXY`） |
 | DeepSeek API | 直连 |
 | Telegram API | 需代理（`HTTPS_PROXY`） |
+
+## AI 交互详解
+
+### 对话模式
+
+两次独立的 API 调用，每次都是一轮问答（无上下文、无历史），通过精心设计的 Prompt 控制输出。
+
+### 调用 1：AI 日报（`summarize_with_deepseek`）
+
+**提供给 AI 的信息：**
+```text
+你是一个专业的 AI 和科技领域新闻编辑。
+
+用户的兴趣领域：AI, Agent, Automation, Python, Startup, SaaS
+
+以下是今天抓取的新闻列表：
+
+1. [OpenAI Announces GPT-5](https://openai.com/...)
+   摘要: OpenAI today announced the next generation...
+2. [LangChain Launches New Agent Framework](https://...)
+   摘要: A new open-source framework for building...
+（共 40-60 条）
+
+请完成以下任务：
+1. 从中筛选出与用户兴趣最相关、最重要的 10 条新闻
+2. 用中文为每条生成简洁摘要（1-2 句）
+3. 给出简短的影响分析
+4. 按重要性排序，用 ★ 评分（最高 ★★★★★，最低 ★★★☆☆）
+5. 每条新闻必须保留原始链接
+
+输出格式严格为（不要添加额外的前言后语）：
+
+【AI 日报】2026年06月14日
+
+★★★★★ **标题**
+摘要：...
+影响：...
+🔗 链接
+```
+
+**期望得到的信息（AI 返回的 Markdown 直接推送 Telegram）：**
+```text
+【AI 日报】2026年06月14日
+
+★★★★★ **OpenAI 发布 GPT-5**
+摘要：OpenAI 正式发布 GPT-5 大模型，推理能力较上代提升 3 倍...
+影响：将推动整个 AI 应用生态升级
+🔗 https://openai.com/...
+
+★★★★☆ **LangChain 推出新 Agent 框架**
+摘要：...
+影响：...
+🔗 ...
+```
+
+---
+
+### 调用 2：关键词追踪（`summarize_keyword_tracking`）
+
+**提供给 AI 的信息：**
+```text
+你是一个信息监控助手，帮助用户追踪特定关键词的最新动态。
+
+追踪关键词：关键词A, 关键词B, 关键词C
+
+以下是今天从网络搜索（新闻、论坛、社交媒体）中抓取到的相关信息：
+
+1. [某产品出现大量退款投诉](https://...) [web]
+   摘要: 近期不少用户在社交媒体上反映...
+（共 20-40 条，每条约 200 字摘要）
+
+请完成以下任务：
+1. 筛选出最重要的 5-8 条信息
+2. 用中文为每条生成简洁摘要（1-2 句）
+3. 按重要性排序，用 ★ 评分
+4. 判断情感倾向（正面/负面/中性）
+5. ⚠️ 如果发现负面信息（投诉、维权、经营异常、资金链、跑路等），必须用 ⚠️ 特别标注并说明
+6. 最后给出综合风险评估（低/中/高）
+
+输出格式严格为（不要添加额外的前言后语）：
+
+🔍 关键词追踪 2026年06月14日
+
+追踪：关键词A, 关键词B, 关键词C
+
+★★★★★ **标题**
+摘要：...
+来源：新闻/论坛/社交媒体
+情感：正面/负面/中性
+🔗 链接
+
+⚠️ 风险提示：（如有）
+
+综合风险评估：低/中/高
+```
+
+**期望得到的信息：**
+```text
+🔍 关键词追踪 2026年06月14日
+追踪：关键词A, 关键词B, 关键词C
+
+★★★★★ **某产品被指虚假宣传**
+摘要：...
+来源：社交媒体
+情感：负面
+🔗 https://...
+
+⚠️ 风险提示：近期出现较多用户投诉，建议关注后续处理进展。
+
+综合风险评估：中
+```
+
+---
+
+### 技术参数
+
+| 参数 | 值 | 说明 |
+|------|-----|------|
+| 模型 | `deepseek-chat` | DeepSeek 标准对话模型 |
+| temperature | 0.3 | 低随机性，保证输出稳定 |
+| max_tokens | 4000 | 足够生成完整日报 |
+| 接口 | `https://api.deepseek.com/v1/chat/completions` | OpenAI 兼容格式 |
+| 上下文 | 无（每次独立调用） | 不携带历史对话 |
+
+### 容错机制
+
+AI 摘要失败时，直接发送原始新闻列表（`_build_fallback_report` / `_build_tracking_fallback`），格式为编号 + 链接。
+
+### 上下文大小分析
+
+> deepseek-chat 上下文窗口为 **128K tokens**，以下均为安全范围。
+
+**AI 日报 Prompt 体积：**
+
+```
+MAX_TOTAL_ITEMS = 60 条新闻
+每条：标题(~10 tokens) + 链接(~20 tokens) + 摘要(~100 tokens) ≈ 130 tokens
+新闻列表：60 × 130 ≈ 7,800 tokens
+系统指令 + 格式要求 ≈ 300 tokens
+─────────────────────────────
+总计 ≈ 8,000 tokens（约 < 128K 的 6%）
+```
+
+**关键词追踪 Prompt 体积：**
+
+```
+假设 3 个关键词，每个返回 ~15 条结果 = 45 条上限（取 30~45 条）
+每条：标题(~10) + 链接(~20) + 摘要(~50) + 来源标记(~2) ≈ 82 tokens
+新闻列表：45 × 82 ≈ 3,700 tokens
+系统指令 + 格式要求 ≈ 400 tokens
+─────────────────────────────
+总计 ≈ 4,100 tokens（约 < 128K 的 3%）
+```
+
+**结论：** 当前规模下没有任何上下文溢出风险。即使 RSS 源数量和关键词数量大幅增加，也有充足余量。
+
+---
 
 ## 依赖
 

@@ -18,6 +18,7 @@ RSS_FEEDS = _parse_list(os.getenv("RSS_FEEDS", ""))
 INTERESTS = _parse_list(os.getenv("INTERESTS", ""))
 SEARCH_KEYWORDS = _parse_list(os.getenv("SEARCH_KEYWORDS", ""))
 SEARCH_MAX_RESULTS = int(os.getenv("SEARCH_MAX_RESULTS", "10"))
+SEARCH_TIME_RANGE = os.getenv("SEARCH_TIME_RANGE", "m")
 
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
@@ -84,7 +85,7 @@ def _search_bing_web(keyword, max_results, items):
     import re
 
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-    url = f"https://www.bing.com/search?q={urllib.parse.quote(keyword)}&setlang=zh-cn&count={max_results}"
+    url = f"https://www.bing.com/search?q={urllib.parse.quote(keyword)}&setlang=zh-cn&count={max_results}&tbs=qdr:{SEARCH_TIME_RANGE}"
     resp = requests.get(url, headers=headers, timeout=15)
     if resp.status_code != 200:
         print(f"[WARN] Bing search returned {resp.status_code}")
