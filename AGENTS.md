@@ -60,6 +60,6 @@ TEST_MODE=1 python main.py            # macOS/Linux
 | `prompts.example.json` | 提示词模板（已提交） |
 | `requirements.txt` | 依赖 |
 | `run_bot.bat` | Windows 计划任务入口 |
-| `ARCHITECTURE.md` | 项目逻辑文档 |
+| `README.md` | 项目逻辑文档 |
 | `output/` | 测试模式输出（gitignored） |
 | `logs/` | 运行日志（gitignored） |
