@@ -413,7 +413,7 @@ def send_telegram(text):
 def _save_local_output(text):
     os.makedirs("output", exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    path = f"output/bot_{ts}.md"
+    path = f"output/bot_{ts}_{time.time_ns()}.md"
     with open(path, "w", encoding="utf-8") as f:
         f.write(text)
     print(f"[TEST] Output saved to {path} ({len(text)} chars)")
