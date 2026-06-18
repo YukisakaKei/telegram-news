@@ -2,7 +2,7 @@ name: AI News Bot
 
 on:
   schedule:
-    - cron: '0 2 * * *'  # 北京时间 10:00 (UTC+8)
+    - cron: '21 2 * * *'  # UTC+8 10:21
   workflow_dispatch:      # 手动触发
 
 env:
